@@ -9,6 +9,8 @@ export function createLegendControl({ map, onModeChange, onLegendClick }) {
   let statusElement;
   let unmappedElement;
   const activeLegendKeysByMode = new Map();
+  /** Snapshot of valid legend keys per mode after the last reconcile (for "had full selection" detection). */
+  const lastValidKeysByMode = new Map();
   const legend = L.control({ position: "bottomleft" });
 
   function getMode() {
@@ -19,24 +21,44 @@ export function createLegendControl({ map, onModeChange, onLegendClick }) {
     return new Set(entries.map((entry) => entry.key));
   }
 
+  function setsEqual(a, b) {
+    if (a.size !== b.size) return false;
+    for (const k of a) {
+      if (!b.has(k)) return false;
+    }
+    return true;
+  }
+
   function reconcileActiveKeys(mode, validKeys) {
+    const validSet = validKeys instanceof Set ? validKeys : new Set(validKeys);
     const existingKeys = activeLegendKeysByMode.get(mode);
-    if (!existingKeys) return new Set(validKeys);
+    const lastValid = lastValidKeysByMode.get(mode);
+
+    if (!existingKeys) {
+      lastValidKeysByMode.set(mode, new Set(validSet));
+      return new Set(validSet);
+    }
+
+    // User had every category selected last frame — keep "all visible" when new categories appear.
+    if (lastValid && setsEqual(existingKeys, lastValid)) {
+      lastValidKeysByMode.set(mode, new Set(validSet));
+      return new Set(validSet);
+    }
 
     const activeKeys = new Set();
     existingKeys.forEach((key) => {
-      if (validKeys.has(key)) {
+      if (validSet.has(key)) {
         activeKeys.add(key);
       }
     });
 
-    validKeys.forEach((key) => {
-      if (!existingKeys.has(key)) {
-        activeKeys.add(key);
-      }
-    });
+    if (activeKeys.size === 0) {
+      lastValidKeysByMode.set(mode, new Set(validSet));
+      return new Set(validSet);
+    }
 
-    return activeKeys.size ? activeKeys : new Set(validKeys);
+    lastValidKeysByMode.set(mode, new Set(validSet));
+    return activeKeys;
   }
 
   legend.onAdd = function onAdd() {
